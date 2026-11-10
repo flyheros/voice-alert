@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>목소리 크기 알리미</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#17201d">
+<link rel="icon" href="icon-192.png">
+<style>
+/* 레이아웃: 한 화면짜리 도구. 위에서부터 큰 계기판 → 시작 버튼 → 기준 설정 → 오늘 기록 */
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --fg:#17201d; --muted:#5d6b66; --line:#d9e0dd;
+  --calm:#2f8f6b; --warn:#d08a1a; --loud:#d2453a; --accent:#2f6f8f;
+  --font-body:"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111715; --surface:#1a2220; --fg:#e7eeeb; --muted:#97a6a0; --line:#2c3633;
+  --calm:#4cc495; --warn:#e8a73c; --loud:#ff6b5e; --accent:#6db3d6; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111715; --surface:#1a2220; --fg:#e7eeeb; --muted:#97a6a0; --line:#2c3633;
+  --calm:#4cc495; --warn:#e8a73c; --loud:#ff6b5e; --accent:#6db3d6; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:max(16px,env(safe-area-inset-top,0px)) max(24px,env(safe-area-inset-bottom,0px));
+  transition:background-color .25s}
+body.alarm{background:var(--loud)}
+main{max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+header h1{font-size:1.35rem;margin:0;text-wrap:balance;letter-spacing:-.01em}
+header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px}
+.meter{display:flex;flex-direction:column;gap:10px;align-items:stretch}
+.readout{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.level{font-family:var(--font-num);font-size:3.6rem;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.state{font-weight:700;font-size:1.05rem;padding:4px 12px;border-radius:999px;color:#fff;background:var(--calm);white-space:nowrap}
+.state.warn{background:var(--warn)} .state.loud{background:var(--loud)} .state.off{background:var(--muted)}
+canvas{width:100%;height:120px;display:block;border-radius:8px;background:var(--bg)}
+.legend{display:flex;justify-content:space-between;color:var(--muted);font-size:.78rem}
+button{font:inherit;font-weight:700;border:0;border-radius:12px;padding:14px 16px;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.primary{background:var(--fg);color:var(--bg);font-size:1.05rem;width:100%}
+.ghost{background:transparent;border:1px solid var(--line);color:var(--fg);padding:10px 14px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row > *{flex:1 1 140px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{display:flex;justify-content:space-between;font-size:.9rem}
+.field label b{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.check{display:flex;align-items:center;gap:8px;font-size:.9rem}
+h2{font-size:1rem;margin:0 0 8px}
+.stats{display:flex;gap:18px;flex-wrap:wrap}
+.stat .n{font-family:var(--font-num);font-size:1.8rem;font-weight:600;font-variant-numeric:tabular-nums}
+.stat .t{color:var(--muted);font-size:.82rem}
+ol.log{list-style:none;margin:10px 0 0;padding:0;max-height:180px;overflow:auto;font-family:var(--font-num);font-size:.88rem}
+ol.log li{display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line)}
+.hint{color:var(--muted);font-size:.85rem;margin:0}
+.msg{font-size:.9rem;margin:0;color:var(--loud)}
+.recbadge{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--muted)}
+.recbadge .dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+.recbadge.on{color:var(--loud);font-weight:700}
+.recbadge.on .dot{background:var(--loud);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.25}}
+.clipshead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.usage{font-family:var(--font-num);font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.bar{height:6px;border-radius:3px;background:var(--bg);overflow:hidden;margin-top:4px}
+.bar span{display:block;height:100%;width:0;background:var(--accent)}
+ol.clips{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+ol.clips li{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:6px}
+.cliphead{display:flex;justify-content:space-between;gap:8px;font-family:var(--font-num);font-size:.88rem;font-variant-numeric:tabular-nums}
+.cliphead span:last-child{color:var(--muted)}
+ol.clips audio{width:100%;height:36px}
+.clipbtns{display:flex;gap:8px}
+.clipbtns a,.clipbtns button{font:inherit;font-size:.85rem;font-weight:600;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);text-decoration:none;cursor:pointer}
+.empty{color:var(--muted);font-size:.9rem}
+@media (prefers-reduced-motion:reduce){body{transition:none}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>목소리 크기 알리미</h1>
+    <p>말소리가 기준보다 몇 초 이상 커지면 진동과 화면 색으로 알려줘요.</p>
+  </header>
+
+  <section class="card meter" aria-live="polite">
+    <div class="readout">
+      <div><span class="level" id="level">--</span></div>
+      <span class="state off" id="state">대기 중</span>
+    </div>
+    <canvas id="chart" aria-label="최근 30초 소리 크기 그래프"></canvas>
+    <div class="legend"><span>30초 전</span><span>— 기준선 <b id="thLegend">72</b></span><span>지금</span></div>
+    <div class="recbadge" id="recBadge" hidden><span class="dot"></span><span id="recText">녹음 대기 중 · 최근 30초만 임시 보관</span></div>
+  </section>
+
+  <button class="primary" id="toggle">듣기 시작</button>
+  <p class="msg" id="msg" hidden></p>
+
+  <section class="card" style="display:flex;flex-direction:column;gap:14px">
+    <h2>알림 기준</h2>
+    <div class="field">
+      <label for="th">기준 크기 <b id="thVal">72</b></label>
+      <input type="range" id="th" min="45" max="95" step="1" value="72">
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="hold">이만큼 계속되면 <b id="holdVal">2초</b></label>
+        <input type="range" id="hold" min="1" max="6" step="1" value="2">
+      </div>
+      <div class="field">
+        <label for="cool">다음 알림까지 <b id="coolVal">8초</b></label>
+        <input type="range" id="cool" min="3" max="30" step="1" value="8">
+      </div>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="vib" checked> 진동</label>
+      <label class="check"><input type="checkbox" id="beep"> 삐 소리</label>
+      <label class="check"><input type="checkbox" id="rec" checked> 알림 순간 녹음</label>
+      <label class="check"><input type="checkbox" id="watch"> 워치로 알림</label>
+    </div>
+    <p class="hint" id="watchHint">켜면 알림이 울릴 때 휴대폰 알림을 하나 띄워요. 갤럭시 워치가 이 알림을 받아 손목에서 진동해요.</p>
+    <button class="ghost" id="calib">내 평소 목소리로 기준 맞추기 (5초)</button>
+    <p class="hint">평소 말하는 크기로 5초 동안 말하면, 그보다 조금 큰 값으로 기준을 잡아요. 숫자는 휴대폰 마이크 기준의 상대값이라 기기마다 달라요.</p>
+  </section>
+
+  <section class="card">
+    <h2>오늘 기록</h2>
+    <div class="stats">
+      <div class="stat"><div class="n" id="todayCount">0</div><div class="t">오늘 알림</div></div>
+      <div class="stat"><div class="n" id="sessionTime">0:00</div><div class="t">이번에 들은 시간</div></div>
+      <div class="stat"><div class="n" id="peak">--</div><div class="t">이번 최고 크기</div></div>
+    </div>
+    <ol class="log" id="log"></ol>
+    <div class="row" style="margin-top:10px"><button class="ghost" id="reset">오늘 기록 지우기</button></div>
+  </section>
+
+  <section class="card">
+    <div class="clipshead"><h2>저장된 소리</h2><span class="usage" id="usage">0:00 / 20:00</span></div>
+    <div class="bar"><span id="usageBar"></span></div>
+    <ol class="clips" id="clips"></ol>
+    <div class="row" style="margin-top:10px"><button class="ghost" id="clearClips">저장된 소리 모두 지우기</button></div>
+    <p class="hint">알림이 울리면 그 전 30초와 후 30초를 한 클립으로 남겨요. 합쳐서 20분이 넘으면 가장 오래된 클립부터 지워져요. 녹음은 이 휴대폰 브라우저 안에만 보관돼요.</p>
+  </section>
+
+  <p class="hint">휴대폰을 식탁처럼 대화하는 자리 가까이에 화면이 보이게 두세요. 화면이 꺼지거나 다른 앱으로 넘어가면 듣기가 멈출 수 있어요. '알림 순간 녹음'이 켜져 있으면 함께 있는 가족에게 녹음된다는 걸 미리 알려 주세요.</p>
+</main>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); }catch(e){ return d; } },
+    set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+  };
+  const todayKey = () => { const d = new Date(); return 'va-log-' + d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate(); };
+
+  // 설정
+  const S = Object.assign({th:72, hold:2, cool:8, vib:true, beep:false, rec:true, watch:false}, store.get('va-settings', {}));
+  const ctl = {th:$('th'), hold:$('hold'), cool:$('cool'), vib:$('vib'), beep:$('beep'), rec:$('rec'), watch:$('watch')};
+  function applySettingsToUI(){
+    ctl.th.value = S.th; ctl.hold.value = S.hold; ctl.cool.value = S.cool;
+    ctl.vib.checked = S.vib; ctl.beep.checked = S.beep; ctl.rec.checked = S.rec; ctl.watch.checked = S.watch;
+    $('thVal').textContent = S.th; $('thLegend').textContent = S.th;
+    $('holdVal').textContent = S.hold + '초'; $('coolVal').textContent = S.cool + '초';
+  }
+  function readSettings(){
+    S.th = +ctl.th.value; S.hold = +ctl.hold.value; S.cool = +ctl.cool.value;
+    S.vib = ctl.vib.checked; S.beep = ctl.beep.checked;
+    if(S.rec && !ctl.rec.checked) Rec.cancelPending();
+    S.rec = ctl.rec.checked;
+    if(!S.watch && ctl.watch.checked) enableWatch();
+    S.watch = ctl.watch.checked;
+    store.set('va-settings', S); applySettingsToUI(); updateBadge(); drawChart();
+  }
+  ['input','change'].forEach(ev => Object.values(ctl).forEach(el => el.addEventListener(ev, readSettings)));
+  applySettingsToUI();
+
+  // 오늘 기록
+  let todayLog = store.get(todayKey(), []);
+  function renderLog(){
+    $('todayCount').textContent = todayLog.length;
+    const ol = $('log'); ol.textContent = '';
+    todayLog.slice().reverse().slice(0, 50).forEach(e => {
+      const li = document.createElement('li');
+      const a = document.createElement('span'); a.textContent = e.t;
+      const b = document.createElement('span'); b.textContent = '최고 ' + e.v;
+      li.append(a, b); ol.append(li);
+    });
+    if(!todayLog.length){
+      const li = document.createElement('li'); li.textContent = '아직 알림이 없어요.'; li.style.color = 'var(--muted)'; ol.append(li);
+    }
+  }
+  renderLog();
+  $('reset').addEventListener('click', () => {
+    if($('reset').dataset.confirm !== '1'){ $('reset').dataset.confirm = '1'; $('reset').textContent = '한 번 더 누르면 지워져요'; return; }
+    todayLog = []; store.set(todayKey(), todayLog); renderLog();
+    $('reset').dataset.confirm = ''; $('reset').textContent = '오늘 기록 지우기';
+  });
+
+  // 오디오
+  let ac = null, stream = null, analyser = null, buf = null, timer = null, wakeLock = null;
+  let running = false, startedAt = 0, sessionPeak = 0, lastAlert = 0, alarmUntil = 0, smooth = 0;
+  const SAMPLE_MS = 100;
+  const history = [];           // 최근 30초 레벨 (100ms 간격 → 300개)
+  const above = [];             // 기준 초과 여부
+  let calibrating = null;
+
+  function levelNow(){
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0; for(let i=0;i<buf.length;i++) sum += buf[i]*buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+    const dbfs = 20 * Math.log10(rms + 1e-9);
+    return Math.max(0, Math.min(100, dbfs + 100)); // 0~100 상대값 (대략 dB에 가깝게)
+  }
+
+  function tick(){
+    const raw = levelNow();
+    smooth = smooth * 0.6 + raw * 0.4;
+    const v = Math.round(smooth);
+    const now = Date.now();
+    history.push(v); if(history.length > 300) history.shift();
+
+    if(calibrating){ calibrating.samples.push(v); }
+
+    const inCooldown = now - lastAlert < S.cool * 1000;
+    const isAbove = v >= S.th && !inCooldown;
+    above.push(isAbove); const win = S.hold * (1000/SAMPLE_MS);
+    while(above.length > win) above.shift();
+    const ratio = above.filter(Boolean).length / win;
+
+    if(v > sessionPeak) sessionPeak = v;
+
+    $('level').textContent = v;
+    const st = $('state');
+    if(now < alarmUntil){ st.className = 'state loud'; st.textContent = '목소리가 커요'; }
+    else if(v >= S.th){ st.className = 'state warn'; st.textContent = '기준 넘음'; }
+    else { st.className = 'state'; st.textContent = '괜찮아요'; }
+    document.body.classList.toggle('alarm', now < alarmUntil);
+
+    if(!calibrating && above.length >= win && ratio >= 0.5) fireAlert(v, now);
+
+    const secs = Math.floor((now - startedAt)/1000);
+    $('sessionTime').textContent = Math.floor(secs/60) + ':' + String(secs%60).padStart(2,'0');
+    $('peak').textContent = sessionPeak;
+    drawChart();
+  }
+
+  function fireAlert(v, now){
+    lastAlert = now; alarmUntil = now + 1500; above.length = 0;
+    if(S.vib && navigator.vibrate) navigator.vibrate([250, 120, 250]);
+    if(S.beep) beep();
+    const d = new Date();
+    const peakInWindow = Math.max.apply(null, history.slice(-S.hold*10));
+    todayLog.push({t: d.toTimeString().slice(0,8), v: Math.max(v, peakInWindow)});
+    store.set(todayKey(), todayLog); renderLog();
+    if(S.rec) Rec.trigger(Math.max(v, peakInWindow));
+    if(S.watch) notifyWatch(Math.max(v, peakInWindow));
+  }
+
+  // ───────── 워치 알림 (휴대폰 알림 → 갤럭시 워치로 전달) ─────────
+  let swReg = null;
+  if('serviceWorker' in navigator && window.isSecureContext){
+    navigator.serviceWorker.register('sw.js').then(r => { swReg = r; }).catch(() => {});
+  }
+  function watchHint(t, bad){ const h = $('watchHint'); h.textContent = t; h.style.color = bad ? 'var(--loud)' : ''; }
+  async function enableWatch(){
+    if(!window.isSecureContext || !('Notification' in window) || !('serviceWorker' in navigator)){
+      watchHint('워치 알림은 https 주소로 연 페이지에서만 돼요.', true); return;
+    }
+    let p = Notification.permission;
+    if(p === 'default'){ try{ p = await Notification.requestPermission(); }catch(e){} }
+    if(p !== 'granted'){
+      watchHint('알림 권한이 꺼져 있어요. 주소창 자물쇠 아이콘 → 권한 → 알림을 허용해 주세요.', true);
+      ctl.watch.checked = false; S.watch = false; store.set('va-settings', S); return;
+    }
+    watchHint('워치 알림이 켜졌어요. 테스트 알림을 하나 보냈어요. 워치에서 진동이 오는지 확인해 보세요.');
+    notifyWatch(null);
+  }
+  async function notifyWatch(level){
+    try{
+      if(Notification.permission !== 'granted') return;
+      const reg = swReg || await navigator.serviceWorker.ready;
+      const body = level === null ? '테스트 알림이에요. 워치에서 진동이 오면 준비 완료!' : '목소리가 커졌어요 (최고 ' + level + ')';
+      await reg.showNotification('목소리 크기 알리미', {
+        body, tag:'voice-alert', renotify:true, silent:false,
+        vibrate:[250,120,250], icon:'icon-192.png', badge:'icon-192.png'
+      });
+      setTimeout(async () => {
+        try{ (await reg.getNotifications({tag:'voice-alert'})).forEach(n => n.close()); }catch(e){}
+      }, 6000);
+    }catch(e){}
+  }
+
+  function beep(){
+    if(!ac) return;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = 880; g.gain.value = 0.15;
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.25);
+  }
+
+  async function start(){
+    $('msg').hidden = true;
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      showMsg('이 화면에서는 마이크를 쓸 수 없어요. 크롬에서 https 주소로 열어 주세요.'); return false;
+    }
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
+    }catch(e){
+      showMsg('마이크 권한이 필요해요. 주소창 옆 자물쇠 아이콘에서 마이크를 허용한 뒤 다시 눌러 주세요.'); return false;
+    }
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ac.createMediaStreamSource(stream);
+    analyser = ac.createAnalyser(); analyser.fftSize = 2048;
+    buf = new Float32Array(analyser.fftSize);
+    src.connect(analyser);
+    Rec.attach(ac, src);
+    running = true; startedAt = Date.now(); sessionPeak = 0; history.length = 0; above.length = 0;
+    timer = setInterval(tick, SAMPLE_MS);
+    keepAwake();
+    $('toggle').textContent = '듣기 멈추기';
+    return true;
+  }
+
+  function stop(){
+    running = false; clearInterval(timer); timer = null;
+    Rec.detach();
+    if(stream) stream.getTracks().forEach(t => t.stop());
+    if(ac) ac.close(); ac = null; stream = null;
+    if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
+    document.body.classList.remove('alarm');
+    $('state').className = 'state off'; $('state').textContent = '대기 중'; $('level').textContent = '--';
+    $('toggle').textContent = '듣기 시작';
+  }
+
+  async function keepAwake(){
+    try{ if('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+  }
+  document.addEventListener('visibilitychange', () => { if(running && document.visibilityState === 'visible') keepAwake(); });
+
+  function showMsg(t){ $('msg').textContent = t; $('msg').hidden = false; }
+
+  $('toggle').addEventListener('click', () => running ? stop() : start());
+
+  $('calib').addEventListener('click', async () => {
+    if(!running && !(await start())) return;
+    const btn = $('calib'); btn.disabled = true;
+    calibrating = {samples: []};
+    let left = 5;
+    btn.textContent = '평소처럼 말해 보세요… ' + left;
+    const iv = setInterval(() => {
+      left--; btn.textContent = left > 0 ? '평소처럼 말해 보세요… ' + left : '계산 중…';
+      if(left <= 0){
+        clearInterval(iv);
+        const s = calibrating.samples.slice().sort((a,b)=>a-b);
+        calibrating = null;
+        if(s.length){
+          const p90 = s[Math.floor(s.length * 0.9)];
+          S.th = Math.max(45, Math.min(95, p90 + 6));
+          store.set('va-settings', S); applySettingsToUI();
+          btn.textContent = '기준을 ' + S.th + '(으)로 맞췄어요. 다시 맞추기';
+        }else{ btn.textContent = '내 평소 목소리로 기준 맞추기 (5초)'; }
+        btn.disabled = false; drawChart();
+      }
+    }, 1000);
+  });
+
+  // ───────── 알림 순간 녹음 ─────────
+  // 최근 30초를 16kHz로 링버퍼에 들고 있다가, 알림이 오면 앞 30초 + 뒤 30초를 WAV 클립으로 저장.
+  // 클립 진행 중 또 알림이 오면 뒤쪽을 연장(클립 최대 90초). 전체 20분 초과 시 오래된 것부터 삭제.
+  const Rec = (function(){
+    const RATE = 16000, PRE = 30, POST = 30, MAX_CLIP = 90, TOTAL = 1200;
+    const ring = new Int16Array(RATE * PRE);
+    let ringPos = 0, ringFill = 0, node = null, sink = null, srcRate = 48000, frac = 0, acc = 0, accN = 0;
+    let pending = null; // {chunks:[Int16Array], len, endAt(samples), startTs, peak}
+    let clips = [];     // 메모리 사본 (IDB 실패 시에도 동작)
+    let urls = new Map();
+
+    // IndexedDB
+    let dbp = null;
+    function db(){
+      if(dbp) return dbp;
+      dbp = new Promise(res => {
+        try{
+          const r = indexedDB.open('va-clips', 1);
+          r.onupgradeneeded = () => r.result.createObjectStore('clips', {keyPath:'id'});
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => res(null);
+        }catch(e){ res(null); }
+      });
+      return dbp;
+    }
+    async function idb(mode, fn){
+      const d = await db(); if(!d) return null;
+      return new Promise(res => {
+        try{
+          const tx = d.transaction('clips', mode), st = tx.objectStore('clips');
+          const r = fn(st); tx.oncomplete = () => res(r && r.result); tx.onerror = () => res(null);
+        }catch(e){ res(null); }
+      });
+    }
+    async function load(){
+      const all = await idb('readonly', st => st.getAll());
+      if(all) clips = all.sort((a,b) => a.ts - b.ts);
+      render();
+    }
+
+    function push(s){ // s: Int16 sample at 16kHz
+      ring[ringPos] = s; ringPos = (ringPos + 1) % ring.length; if(ringFill < ring.length) ringFill++;
+      if(pending){
+        const c = pending.cur;
+        c[pending.curN++] = s; pending.len++;
+        if(pending.curN === c.length){ pending.chunks.push(c); pending.cur = new Int16Array(RATE); pending.curN = 0; }
+        if(pending.len >= pending.endAt) finish();
+      }
+    }
+    function onAudio(e){
+      const x = e.inputBuffer.getChannelData(0);
+      const step = srcRate / RATE;
+      for(let i=0;i<x.length;i++){
+        acc += x[i]; accN++; frac += 1;
+        if(frac >= step){
+          frac -= step;
+          const v = Math.max(-1, Math.min(1, acc / accN));
+          push(v < 0 ? v * 0x8000 : v * 0x7fff);
+          acc = 0; accN = 0;
+        }
+      }
+    }
+    function attach(ac, src){
+      srcRate = ac.sampleRate; frac = 0; acc = 0; accN = 0; ringFill = 0; ringPos = 0;
+      node = ac.createScriptProcessor(4096, 1, 1);
+      sink = ac.createGain(); sink.gain.value = 0;
+      node.onaudioprocess = onAudio;
+      src.connect(node); node.connect(sink); sink.connect(ac.destination);
+      updateBadge();
+    }
+    function detach(){
+      if(pending) finish();
+      if(node){ try{ node.disconnect(); sink.disconnect(); }catch(e){} }
+      node = null; sink = null; ringFill = 0; updateBadge();
+    }
+    function trigger(peak){
+      if(!node) return;
+      if(pending){
+        pending.peak = Math.max(pending.peak, peak);
+        pending.endAt = Math.min(RATE * MAX_CLIP, pending.len + RATE * POST);
+        return;
+      }
+      // 링버퍼의 앞부분(최근 30초)을 시간 순서대로 복사
+      const pre = new Int16Array(ringFill);
+      const start = (ringPos - ringFill + ring.length) % ring.length;
+      for(let i=0;i<ringFill;i++) pre[i] = ring[(start + i) % ring.length];
+      pending = {chunks:[pre], cur:new Int16Array(RATE), curN:0, len:pre.length,
+                 endAt: pre.length + RATE * POST, startTs: Date.now() - Math.round(pre.length / RATE * 1000), peak};
+      updateBadge();
+    }
+    function cancelPending(){ pending = null; updateBadge(); }
+
+    function wav(chunks, len){
+      const buf = new ArrayBuffer(44 + len * 2), dv = new DataView(buf);
+      const w = (o, s) => { for(let i=0;i<s.length;i++) dv.setUint8(o+i, s.charCodeAt(i)); };
+      w(0,'RIFF'); dv.setUint32(4, 36 + len*2, true); w(8,'WAVE'); w(12,'fmt ');
+      dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+      dv.setUint32(24,RATE,true); dv.setUint32(28,RATE*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true);
+      w(36,'data'); dv.setUint32(40, len*2, true);
+      const out = new Int16Array(buf, 44, len); let o = 0;
+      for(const c of chunks){ const n = Math.min(c.length, len - o); out.set(n === c.length ? c : c.subarray(0, n), o); o += n; if(o >= len) break; }
+      return new Blob([buf], {type:'audio/wav'});
+    }
+    async function finish(){
+      const p = pending; pending = null; updateBadge();
+      if(!p) return;
+      const chunks = p.chunks.concat(p.curN ? [p.cur.subarray(0, p.curN)] : []);
+      const clip = {id: p.startTs + '-' + Math.random().toString(36).slice(2,7), ts: p.startTs,
+                    dur: p.len / RATE, peak: p.peak, blob: wav(chunks, p.len)};
+      clips.push(clip);
+      await idb('readwrite', st => st.put(clip));
+      await trim();
+      render();
+    }
+    async function trim(){
+      let total = clips.reduce((a,c) => a + c.dur, 0);
+      while(total > TOTAL && clips.length > 1){
+        const old = clips.shift(); total -= old.dur; await remove(old.id, true);
+      }
+    }
+    async function remove(id, silent){
+      clips = clips.filter(c => c.id !== id);
+      if(urls.has(id)){ URL.revokeObjectURL(urls.get(id)); urls.delete(id); }
+      await idb('readwrite', st => st.delete(id));
+      if(!silent) render();
+    }
+    async function clearAll(){
+      for(const c of clips.slice()) await remove(c.id, true);
+      clips = []; render();
+    }
+
+    const fmt = s => Math.floor(s/60) + ':' + String(Math.round(s%60)).padStart(2,'0');
+    function render(){
+      const total = clips.reduce((a,c) => a + c.dur, 0);
+      $('usage').textContent = fmt(Math.min(total, TOTAL)) + ' / 20:00';
+      $('usageBar').style.width = Math.min(100, total / TOTAL * 100) + '%';
+      const ol = $('clips'); ol.textContent = '';
+      if(!clips.length){
+        const li = document.createElement('li'); li.className = 'empty'; li.style.borderTop = '0';
+        li.textContent = '아직 저장된 소리가 없어요. 알림이 울리면 여기에 쌓여요.'; ol.append(li); return;
+      }
+      clips.slice().reverse().forEach(c => {
+        if(!urls.has(c.id)) urls.set(c.id, URL.createObjectURL(c.blob));
+        const url = urls.get(c.id), d = new Date(c.ts);
+        const stamp = (d.getMonth()+1) + '/' + d.getDate() + ' ' + d.toTimeString().slice(0,8);
+        const li = document.createElement('li');
+        const head = document.createElement('div'); head.className = 'cliphead';
+        const a = document.createElement('span'); a.textContent = stamp;
+        const b = document.createElement('span'); b.textContent = fmt(c.dur) + ' · 최고 ' + c.peak;
+        head.append(a, b);
+        const au = document.createElement('audio'); au.controls = true; au.preload = 'none'; au.src = url;
+        const btns = document.createElement('div'); btns.className = 'clipbtns';
+        const dl = document.createElement('a'); dl.href = url; dl.textContent = '내려받기';
+        dl.download = '목소리_' + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0') + '_' + d.toTimeString().slice(0,8).replace(/:/g,'') + '.wav';
+        const del = document.createElement('button'); del.type = 'button'; del.textContent = '삭제';
+        del.addEventListener('click', () => remove(c.id));
+        btns.append(dl, del);
+        li.append(head, au, btns); ol.append(li);
+      });
+    }
+
+    return {attach, detach, trigger, cancelPending, load, clearAll, isRecording: () => !!pending, isArmed: () => !!node};
+  })();
+
+  function updateBadge(){
+    const b = $('recBadge'); if(!b) return;
+    const armed = running && S.rec && Rec.isArmed();
+    b.hidden = !armed;
+    b.classList.toggle('on', Rec.isRecording());
+    $('recText').textContent = Rec.isRecording() ? '녹음 중 · 알림 앞뒤 30초를 저장하고 있어요' : '녹음 대기 중 · 최근 30초만 임시 보관';
+  }
+  updateBadge();
+  Rec.load();
+  $('clearClips').addEventListener('click', () => {
+    const btn = $('clearClips');
+    if(btn.dataset.confirm !== '1'){ btn.dataset.confirm = '1'; btn.textContent = '한 번 더 누르면 모두 지워져요'; return; }
+    Rec.clearAll(); btn.dataset.confirm = ''; btn.textContent = '저장된 소리 모두 지우기';
+  });
+
+  // 그래프
+  const cv = $('chart'), cx = cv.getContext('2d');
+  function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function drawChart(){
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if(cv.width !== w*dpr || cv.height !== h*dpr){ cv.width = w*dpr; cv.height = h*dpr; }
+    cx.setTransform(dpr,0,0,dpr,0,0); cx.clearRect(0,0,w,h);
+    const lo = 30, hi = 100, y = v => h - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * h;
+    const ty = y(S.th);
+    cx.strokeStyle = css('--line'); cx.lineWidth = 1;
+    [40,60,80].forEach(g => { cx.beginPath(); cx.moveTo(0,y(g)); cx.lineTo(w,y(g)); cx.stroke(); });
+    const n = history.length, step = w / 299;
+    for(let i=0;i<n;i++){
+      const v = history[i], x = w - (n-1-i)*step;
+      cx.fillStyle = v >= S.th ? css('--loud') : css('--calm');
+      const top = y(v); cx.fillRect(x - step/2, top, Math.max(1, step), h - top);
+    }
+    cx.strokeStyle = css('--warn'); cx.setLineDash([6,4]); cx.lineWidth = 2;
+    cx.beginPath(); cx.moveTo(0,ty); cx.lineTo(w,ty); cx.stroke(); cx.setLineDash([]);
+  }
+  window.addEventListener('resize', drawChart);
+  drawChart();
+})();
+</script>
+</body>
+</html>
